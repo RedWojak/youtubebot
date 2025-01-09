@@ -35,8 +35,11 @@ func (t *Telegrambot) NewBot() (error) {
 		return c.Send("Hello!")
 	})
 
+	
+
+
 	t.bot.Handle(tele.OnText, func(c tele.Context) error {
-		videoID, err := videodownloader.Download(c.Update().Message.Text)
+		videoID, videoName, err := videodownloader.Download(c.Update().Message.Text)
 		
 		fmt.Println("RECEIVED REQUEST: ", c.Update().Message.Text, "\n", "USER ID: ", c.Sender().ID, " USER NAME: ", c.Sender().Username, "\n")
 
@@ -44,7 +47,7 @@ func (t *Telegrambot) NewBot() (error) {
 		
 		if err != nil {
 			return c.Send("Bad request :" + c.Update().Message.Text + "\n" + "Send me valid youtube link")
-			return c.Send("Bad request :", c.Update().Message.Text, "\n", "Follow the pattern: https://www.youtube.com/watch?v=pWSMRTLHy1E")
+			
 		}
 
 		if videoID == "" {
@@ -55,8 +58,12 @@ func (t *Telegrambot) NewBot() (error) {
 			return c.Send("Download failed, Video is too long, please stick to videos that are no longer then "+time.Duration(videodownloader.MaxDuration).String())
 		}
 
+		if videoID == videodownloader.FileIsTooBig {
+			return c.Send("Download failed, Video is too big, please try smaller video "+time.Duration(videodownloader.MaxDuration).String())
+		}
+
 		c.Send("Downloading is done. Sending Video to you NOW!")
-		file := &tele.Video{File : tele.FromDisk(videoID)}
+		file := &tele.Video{File : tele.FromDisk(videoID), FileName: videoName}
 		
 		return c.Send(file)
 

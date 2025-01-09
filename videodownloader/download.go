@@ -21,33 +21,35 @@ const videoPrefix = "video_"
 const audioPrefix = "audio_"
 const outputPathDirectory = "output"
 const TooLong = "1"
+const TooBig = 50000000
+const FileIsTooBig = "2"
 // Download downloads a YouTube video given its URL.
 //
 // Download is a convenience function that parses a YouTube video URL and
 // downloads the video.
 
-func Download(url string) (string, error) {
+func Download(url string) (string, string, error) {
 	videoID, err := getVideoIDfromURL(url)
 	if err != nil {
 		fmt.Println(err)
-		return "",err
+		return "", "", err
 	}
 
 	//check if file already downloaded
 	if _, err := os.Stat(outputPathDirectory+ "/" + videoID + ".mp4"); err == nil {
 	   fmt.Println("!already have in cache")
-	   return (outputPathDirectory+ "/" + videoID + ".mp4"), nil
+	   return (outputPathDirectory+ "/" + videoID + ".mp4"), "cachedVideo", nil
 	} 
 
-	videoFileName, requiresAudio, err := downloadVideo(videoID)
+	videoFileName, requiresAudio, title, err := downloadVideo(videoID)
 
 	if !requiresAudio {
-		return videoFileName, nil
+		return videoFileName, title, nil
 	}
 
 	if err != nil {
 		fmt.Println(err)
-		return "",err
+		return "", "", err
 	}
 	
 	//if audio is present skip merge
@@ -56,17 +58,17 @@ func Download(url string) (string, error) {
 	audioFileName, err := downloadAudio(videoID)
 	if err != nil {
 		fmt.Println(err)
-		return "",err
+		return "", "", err
 	}
 	mergedVideName, err  := mergeVideoAndAudio(videoFileName, audioFileName)
 	if err != nil {
 		fmt.Println(err)
-		return "",err
+		return "", "",err
 	}
 
 	deleteVideAndAudio()
 	
-	return mergedVideName, nil
+	return mergedVideName, title,  nil
 }
 
 
@@ -99,7 +101,7 @@ func getVideoIDfromURL(youtubeurl string) (string, error) {
 }
 
 // downloadVideo downloads the video content given a YouTube video ID.
-func downloadVideo (id string) (string, bool, error) {
+func downloadVideo (id string) (string, bool, string, error) {
 	
 	requiresAudio := true
 
@@ -108,15 +110,16 @@ func downloadVideo (id string) (string, bool, error) {
 	video, err := client.GetVideo(videoID)
 	if err != nil {
 		fmt.Println(err)
-		return "", false, err
+		return "", false, "", err
 	}
 
 	formats := video.Formats
-
+	
 	fmtIndex := 0
 	for i, f := range formats {
 		fmt.Println(f.ApproxDurationMs, f.AudioChannels, f.Quality, f.Width, f.ApproxDurationMs)
 		if f.Width < defaultVideoQuality {
+			
 			fmtIndex = i
 			if f.AudioChannels > 0 {
 				requiresAudio = false
@@ -126,13 +129,13 @@ func downloadVideo (id string) (string, bool, error) {
 	}
 	fmt.Println(video.Duration, MaxDuration)
 	if video.Duration > MaxDuration {
-		return TooLong, false, fmt.Errorf("Video is too long: %v", video.Duration)
+		return TooLong, false, "", fmt.Errorf("Video is too long: %v", video.Duration)
 	}
 
 	stream, _, err := client.GetStream(video, &formats[fmtIndex])
 	if err != nil {
 		fmt.Println(err)
-		return "", false, err
+		return "", false, "", err
 	}
 	defer stream.Close()
 
@@ -153,7 +156,7 @@ func downloadVideo (id string) (string, bool, error) {
 	
 
 
-	return fileName, requiresAudio, nil 
+	return fileName, requiresAudio, video.Title, nil 
 }
 
 func downloadAudio (id string) (string, error) {
@@ -169,8 +172,22 @@ func downloadAudio (id string) (string, error) {
 
 	formats := video.Formats.WithAudioChannels()
 
+	if len(formats) == 0 {
+		return "", fmt.Errorf("No audio found")
+	}
+
+	audioindex := 0
+
+	for i, f := range formats {
+		fmt.Println(f.ApproxDurationMs, f.AudioChannels, f.Quality, f.Width, f.ApproxDurationMs, f.LanguageDisplayName(), i)
+		if strings.Contains(f.LanguageDisplayName(), "original") {
+			audioindex = i
+			break
+		}
 		
-	stream, _, err := client.GetStream(video, &formats[0])
+	}
+		
+	stream, _, err := client.GetStream(video, &formats[audioindex])
 	if err != nil {
 		fmt.Println(err)
 		return "",  err
@@ -212,7 +229,18 @@ func mergeVideoAndAudio (videoFileName string, audioFileName string) (string, er
 		return "", err
 	}
 
+	file, err := os.Stat(outputFileName)
+	if err != nil {
+		return "", err
+	}
+	// get the size
+	size := file.Size()
 
+	fmt.Println("file size in bytes: ", size)
+
+	if size > TooBig {
+		return FileIsTooBig, nil
+	}
 
 	return outputFileName, nil
 }
